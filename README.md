@@ -172,6 +172,35 @@ the swing extreme can ever count as a zone entry. Regression-tested in
 fixture verified to reproduce the bug against the old (unfloored)
 window before the fix.
 
+### Fixed: fib/FVG zone drawn from the wrong swing low (wrong-anchor bug)
+
+A second, deeper bug behind the same AWEUSDT false positive: even once a
+touch is only counted after the swing extreme, the fib itself was being
+drawn from the wrong low. `get_impulsive_leg()` (`trend_fvg/swings.py`)
+picked the *nearest* swing low before the current high as the fib's 100%
+anchor. In a large impulsive move followed by a series of minor,
+shallower higher-low pullbacks near the top -- completely normal price
+action -- the nearest prior low is one of those minor pullbacks, not
+where the move actually started. Anchoring the fib there draws it across
+only the last small internal leg, so the 0.618/0.705/0.79 levels land up
+near the recent highs instead of deep below the true leg's midpoint,
+which is exactly what was seen on the live chart: the zone sitting at
+the top of the move instead of in the discount area.
+
+Fixed by walking backward from the nearest prior low through the chain
+of consecutive swing lows (for an uptrend; consecutive swing highs for a
+downtrend), extending the anchor back as long as each earlier one is
+still lower (resp. higher), and stopping at the earliest point still in
+that unbroken chain -- i.e. the swing that actually began the current
+impulsive structure, not just the closest one in time. Regression-tested
+in `tests/test_swings.py` (`TestImpulsiveLegFindsTrueMoveOrigin`) with
+realistic multi-candle OHLC modeling exactly this shape (a deep true
+start, a large impulsive ramp, then two rounds of new-high-then-minor-
+pullback near the top), asserting both that the true origin is selected
+over either minor pullback and that the resulting fib levels land below
+the leg's true midpoint -- and, in a fixture-sanity test, that the old
+nearest-low anchor would have placed them above it.
+
 ## Known limitations / ideas for later
 
 - The scanner is stateless across runs: it recomputes everything from
