@@ -1,0 +1,29 @@
+{
+  "base_url": "https://fapi.bitunix.com/api/v1/futures/market",
+  "breakout_body_ratio": 0.7,
+  "candle_history": 250,
+  "fib_ratios": [
+    0.618,
+    0.705,
+    0.79
+  ],
+  "interval_map": {
+    "15m": "15m",
+    "1h": "1h",
+    "30m": "30m",
+    "5m": "5m"
+  },
+  "market_bias": "LONG",
+  "max_retracement_angle_degrees": 30,
+  "pivot_lookback": 3,
+  "poll_interval_minutes": 5,
+  "quote_currency": "USDT",
+  "recent_touch_window": 20,
+  "request_timeout_seconds": 10,
+  "timeframes": [
+    "5m",
+    "15m",
+    "30m",
+    "1h"
+  ]
+}
