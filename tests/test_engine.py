@@ -5,7 +5,7 @@ from trend_fvg.models import Candle
 
 CFG = {
     "pivot_lookback": 1,
-    "fib_ratios": (0.618, 0.705, 0.79),
+    "fib_ratios": (0.382, 0.295, 0.21),
     "max_retracement_angle_degrees": 30,
     "min_trendline_touches": 3,
     "breakout_body_ratio": 0.70,
@@ -156,7 +156,7 @@ class TestPreExtremeTouchIsNotARetracement(unittest.TestCase):
 
     CFG = {
         "pivot_lookback": 5,
-        "fib_ratios": (0.618, 0.705, 0.79),
+        "fib_ratios": (0.382, 0.295, 0.21),
         "max_retracement_angle_degrees": 30,
         "min_trendline_touches": 3,
         "breakout_body_ratio": 0.70,

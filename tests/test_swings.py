@@ -83,7 +83,7 @@ class TestImpulsiveLegFindsTrueMoveOrigin(unittest.TestCase):
     "grind higher" after the initial impulse) means the nearest prior low
     is one of those minor pullbacks, not the true origin. Using it draws
     the fib across only the last small internal leg, placing the
-    0.618/0.705/0.79 levels near the recent highs instead of deep below
+    0.382/0.295/0.21 levels near the recent highs instead of deep below
     the real move's midpoint.
 
     This fixture reproduces that shape with realistic multi-candle OHLC:
@@ -135,7 +135,7 @@ class TestImpulsiveLegFindsTrueMoveOrigin(unittest.TestCase):
         extreme, prior = get_impulsive_leg(pivots, trend)
 
         midpoint = (extreme.price + prior.price) / 2
-        levels = compute_fib_levels(trend, extreme.price, prior.price, ratios=(0.618, 0.705, 0.79))
+        levels = compute_fib_levels(trend, extreme.price, prior.price, ratios=(0.382, 0.295, 0.21))
         for ratio, level in levels.items():
             self.assertLess(level, midpoint, "0.%s level should sit below the true leg's midpoint" % ratio)
 
@@ -153,7 +153,7 @@ class TestImpulsiveLegFindsTrueMoveOrigin(unittest.TestCase):
 
         nearest_minor_pullback_price = 76  # idx36, the most recent low before the extreme
         buggy_levels = compute_fib_levels(
-            trend, extreme.price, nearest_minor_pullback_price, ratios=(0.618, 0.705, 0.79)
+            trend, extreme.price, nearest_minor_pullback_price, ratios=(0.382, 0.295, 0.21)
         )
         for ratio, level in buggy_levels.items():
             self.assertGreater(

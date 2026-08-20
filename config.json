@@ -4,9 +4,9 @@
   "candle_history": 250,
   "debug_log_file": "trend_fvg_debug.log",
   "fib_ratios": [
-    0.618,
-    0.705,
-    0.79
+    0.382,
+    0.295,
+    0.21
   ],
   "interval_map": {
     "15m": "15m",

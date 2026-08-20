@@ -17,8 +17,13 @@ independently):
 2. **Trend filter** -- swing highs/lows (fractals) are detected; a
    sequence of higher-high + higher-low is an uptrend, lower-high +
    lower-low is a downtrend. Anything else is skipped.
-3. **Reverse Fibonacci** -- drawn from the most recent swing extreme back
-   to the prior opposite swing. Levels marked: `0.618`, `0.705`, `0.79`.
+3. **Fibonacci** -- drawn in the standard direction: low -> high for an
+   uptrend (0% at the swing low, 100% at the swing high), high -> low for
+   a downtrend. Levels marked: `0.382`, `0.295`, `0.21` -- the mirror of
+   the classic `0.618`/`0.705`/`0.79` around the 50% midpoint, which is
+   what standard-direction drawing requires to land the zone in the
+   discount (resp. premium) area. Same prices either way; see
+   `trend_fvg/fibonacci.py`.
 4. **FVG confluence** -- all valid Fair Value Gaps inside that impulsive
    leg are found; at least one must overlap a fib level.
 5. **Retracement slope + trendline** -- a line is drawn from the swing
@@ -65,7 +70,7 @@ trend_fvg/
   bitunix_client.py         REST client for Bitunix (symbols + klines)
   models.py                 Candle / Swing / FVG / Signal data structures
   swings.py                 pivot detection + HH/HL / LH/LL trend classification
-  fibonacci.py               reverse fib level calculation
+  fibonacci.py               fib level calculation (standard direction)
   fvg.py                     FVG detection with the 5-candle invalidation rule
   confluence.py               FVG <-> fib level overlap check
   slope.py                    normalized retracement angle + trendline touch count
@@ -200,6 +205,23 @@ pullback near the top), asserting both that the true origin is selected
 over either minor pullback and that the resulting fib levels land below
 the leg's true midpoint -- and, in a fixture-sanity test, that the old
 nearest-low anchor would have placed them above it.
+
+### Changed: fib ratios switched to standard draw direction (0.382/0.295/0.21)
+
+`fibonacci.py` previously drew the fib in a "reverse" direction (0% at
+the swing extreme, 100% at the prior swing) and used the classic
+0.618/0.705/0.79 ratios to land the confluence zone in the discount
+(resp. premium) area. It now draws the fib in the standard direction
+instead -- low -> high for an uptrend (0% at the swing low, 100% at the
+swing high), high -> low for a downtrend -- which means the ratios that
+land in the same discount/premium area are the mirror around the 50%
+midpoint: `0.382`, `0.295`, `0.21` (default `fib_ratios` in
+`config.json`). Both conventions produce the *exact same prices*; only
+which end of the leg is labeled "0%" changed. Regression-tested in
+`tests/test_fibonacci.py` (discount/premium-zone tests use the new
+ratios against the standard-direction formula) and
+`tests/test_swings.py` (`TestImpulsiveLegFindsTrueMoveOrigin`, updated
+to match).
 
 ## Known limitations / ideas for later
 

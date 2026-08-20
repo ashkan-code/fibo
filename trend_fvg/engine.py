@@ -1,4 +1,4 @@
-"""Per-symbol/per-timeframe pipeline: trend filter -> reverse fib ->
+"""Per-symbol/per-timeframe pipeline: trend filter -> fib ->
 FVG/fib confluence -> retracement slope/trendline -> current price status.
 """
 

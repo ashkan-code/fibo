@@ -9,7 +9,7 @@ DEFAULT_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.ab
 DEFAULTS = {
     "market_bias": "LONG",
     "pivot_lookback": 3,
-    "fib_ratios": [0.618, 0.705, 0.79],
+    "fib_ratios": [0.382, 0.295, 0.21],
     "max_retracement_angle_degrees": 30,
     "min_trendline_touches": 3,
     "breakout_body_ratio": 0.70,

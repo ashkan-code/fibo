@@ -73,7 +73,7 @@ class TestCondensedScanLog(unittest.TestCase):
             status="MARKET",
             zone_low=20,
             zone_high=30,
-            fib_ratio=0.618,
+            fib_ratio=0.382,
             angle_degrees=12.1,
             touch_index=5,
             entry=0.0909,

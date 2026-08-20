@@ -54,9 +54,9 @@ def get_impulsive_leg(pivots, trend):
     a minor internal pullback that happened during the later, shallower
     part of a large impulsive move (e.g. a small dip near new highs)
     must not be mistaken for the leg's true origin: using it would draw
-    the reverse fib from the wrong anchor and place the 0.618/0.705/0.79
-    zone near the top of the move instead of in the deep/discount area
-    below its midpoint, where a real retracement zone belongs.
+    the fib from the wrong anchor and place the 0.382/0.295/0.21 zone
+    near the top of the move instead of in the deep/discount area below
+    its midpoint, where a real retracement zone belongs.
     """
     highs = [p for p in pivots if p.kind == "high"]
     lows = [p for p in pivots if p.kind == "low"]
