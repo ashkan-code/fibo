@@ -114,6 +114,114 @@ class TestEnginePipeline(unittest.TestCase):
         self.assertIsNone(result.signal)
         self.assertTrue(result.reason.startswith("retracement too steep, angle="))
 
+    def test_still_trending_with_no_pullback_is_not_a_signal(self):
+        # Price makes the swing high and then just keeps climbing, exactly
+        # like the reported AWEUSDT false positive: it never comes back
+        # down into the FVG/fib zone at all. Must NOT produce IN_RANGE or
+        # MARKET -- there's nothing to evaluate an entry status for yet.
+        #
+        # idx11 dips slightly (stays below 50) so idx10 remains a valid
+        # swing-high pivot; idx12 onward then climbs straight through and
+        # past it with no pullback, same as "decline" but inverted (climb
+        # instead of drop) -- it never dips back toward the zone again.
+        rows = _hand_prefix() + [(48, 49, 47, 48.5)] + _decline(50, 70, 12, 19)
+        candles = [
+            Candle(index=i, timestamp=i * 60, open=o, high=h, low=l, close=c, volume=0.0)
+            for i, (o, h, l, c) in enumerate(rows)
+        ]
+        result = engine.analyze(candles, "AWEUSDT", "5m", "LONG", CFG)
+        self.assertIsNone(result.signal)
+        self.assertEqual(result.reason, "zone not reached yet")
+
+
+class TestPreExtremeTouchIsNotARetracement(unittest.TestCase):
+    """Regression test for a real false-positive found via live testing
+    (AWEUSDT, 5m): a candle that wicked into what later became the FVG
+    zone *before* the swing high was even made (completely normal -- the
+    original impulsive rally has to pass through that price band on its
+    way up, and can easily wobble back into it during a mid-rally
+    consolidation) must never be mistaken for a genuine post-high
+    retracement touch. Only candles strictly after the swing extreme
+    count.
+
+    This fixture is built to specifically exercise that path: the FVG
+    confirms well before the swing high forms, there's a multi-candle gap
+    between confirmation and the high with a wick dipping back into the
+    zone in between, and afterward price only keeps climbing (no real
+    pullback ever happens). Before the fix, this would incorrectly
+    resolve to a signal; see the assertion in
+    test_pre_extreme_wick_is_rejected below plus the standalone
+    reproduction used while diagnosing the bug.
+    """
+
+    CFG = {
+        "pivot_lookback": 5,
+        "fib_ratios": (0.618, 0.705, 0.79),
+        "max_retracement_angle_degrees": 30,
+        "min_trendline_touches": 3,
+        "breakout_body_ratio": 0.70,
+        "recent_touch_window": 50,
+    }
+
+    def _candles(self):
+        rows = []
+        rows += [(25, 26, 24, 25)] * 5              # idx0-4 filler
+        rows += [(20.5, 21, 20, 20.8)]                # idx5 early low pivot (20)
+        rows += [(21, 22, 20.5, 21.5)] * 4            # idx6-9 filler
+        rows += [(29.5, 30, 29, 29.8)]                # idx10 early high pivot (30)
+        rows += [(28, 29, 27, 28)] * 4                # idx11-14 filler
+        rows += [(24.5, 25, 24, 24.8)]                # idx15 low pivot (24) -- "prior"
+        rows += [(25, 29, 24.5, 28)] * 3              # idx16-18 climb
+        rows += [(30, 40, 29, 39)]                    # idx19 FVG c1: high=40
+        rows += [(39, 70, 38, 69)]                    # idx20 FVG c2: impulsive
+        rows += [(65, 80, 55, 79)]                    # idx21 FVG c3: low=55 -> gap [40, 55]
+        rows += [(79, 85, 78, 84)]                    # idx22 confirm candle 1
+        rows += [(84, 90, 83, 89)]                    # idx23 confirm candle 2 (FVG confirmed)
+        rows += [(89, 95, 88, 94)]                    # idx24 still climbing
+        rows += [(94, 96, 45, 95)]                    # idx25 mid-rally wick dips into [40, 55]
+        rows += [(95, 99, 94, 98)]                    # idx26 climbing again
+        rows += [(98, 105, 97, 104)]                  # idx27 swing high pivot (105) -- "extreme"
+        rows += [(103, 104, 102, 103)] * 6            # idx28-33 padding after the high, never retraces
+        return [
+            Candle(index=i, timestamp=i * 60, open=o, high=h, low=l, close=c, volume=0.0)
+            for i, (o, h, l, c) in enumerate(rows)
+        ]
+
+    def test_pre_extreme_wick_is_rejected(self):
+        candles = self._candles()
+        result = engine.analyze(candles, "AWEUSDT", "5m", "LONG", self.CFG)
+        self.assertIsNone(result.signal)
+        self.assertEqual(result.reason, "zone not reached yet")
+
+    def test_fixture_actually_exercises_the_bug(self):
+        # Sanity check on the fixture itself: confirm the pre-extreme
+        # candle (idx25) really does sit inside the FVG's window under the
+        # OLD (pre-fix) bound -- i.e. this test would have failed before
+        # the extreme.index+1 floor was added, proving it's a real
+        # regression test and not a fixture that happens to pass anyway.
+        from trend_fvg.confluence import fvgs_overlapping_fib
+        from trend_fvg.fibonacci import compute_fib_levels
+        from trend_fvg.fvg import detect_fvgs
+        from trend_fvg.swings import classify_trend, find_pivots, get_impulsive_leg
+
+        candles = self._candles()
+        pivots = find_pivots(candles, self.CFG["pivot_lookback"])
+        trend = classify_trend(pivots)
+        extreme, prior = get_impulsive_leg(pivots, trend)
+        fib_levels = compute_fib_levels(trend, extreme.price, prior.price, self.CFG["fib_ratios"])
+        fvgs = detect_fvgs(candles, min(extreme.index, prior.index), max(extreme.index, prior.index), trend)
+        matched = sorted(fvgs_overlapping_fib(fvgs, fib_levels), key=lambda pair: pair[0].idx3)
+        fvg, _ratio = matched[-1]
+
+        old_window_start = max(fvg.confirmed_idx, len(candles) - self.CFG["recent_touch_window"])
+        pre_extreme_touch_idx = None
+        for j in range(old_window_start, len(candles)):
+            c = candles[j]
+            if c.low <= fvg.gap_high and c.high >= fvg.gap_low:
+                pre_extreme_touch_idx = j
+        self.assertIsNotNone(pre_extreme_touch_idx)
+        self.assertLess(pre_extreme_touch_idx, extreme.index)
+
 
 if __name__ == "__main__":
     unittest.main()

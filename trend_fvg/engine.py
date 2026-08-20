@@ -64,7 +64,17 @@ def analyze(candles, symbol, timeframe, market_bias, cfg):
     # the LAST (most recent) touching candle in the window, not the first:
     # that's the actual entry point price is reacting from right now, and
     # it's the correct trendline endpoint (see below).
-    window_start = max(fvg.confirmed_idx, len(candles) - cfg["recent_touch_window"])
+    #
+    # Critical: the window must never reach back to candles at or before
+    # the swing extreme itself. The impulsive leg naturally passes through
+    # the eventual FVG's price band on its way up (candle1 of a bullish
+    # FVG touches gap_low by construction, and a mid-rally consolidation
+    # can easily wick back into the zone too) -- none of that is a real
+    # retracement. Only a candle strictly AFTER the extreme represents
+    # price actually pulling back into the zone once the high was made.
+    # Without this floor, a still-trending, never-pulled-back symbol can
+    # get a false "touch" from its own pre-high price action.
+    window_start = max(fvg.confirmed_idx, len(candles) - cfg["recent_touch_window"], extreme.index + 1)
     touch_idx = None
     for j in range(window_start, len(candles)):
         c = candles[j]

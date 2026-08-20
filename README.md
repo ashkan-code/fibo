@@ -23,12 +23,16 @@ independently):
    leg are found; at least one must overlap a fib level.
 5. **Retracement slope + trendline** -- a line is drawn from the swing
    extreme to the *last* candle that touched the FVG zone (not just any
-   two points). Its angle (abs value, on a price-range-normalized
-   synthetic scale -- see `trend_fvg/slope.py` for why raw price/time
-   units can't be compared directly) must be shallow (< 30 degrees), and
-   at least `min_trendline_touches` (default 3) candles along that line
-   -- swing extreme and final touch included -- must actually rest on it
-   for the line to count as confirmed rather than two arbitrary points.
+   two points), and that touch must have happened strictly *after* the
+   swing extreme -- price passing through the zone's price band on its
+   way up to make the high (which it always does) doesn't count; see
+   "zone-entry false positive" below. The line's angle (abs value, on a
+   price-range-normalized synthetic scale -- see `trend_fvg/slope.py` for
+   why raw price/time units can't be compared directly) must be shallow
+   (< 30 degrees), and at least `min_trendline_touches` (default 3)
+   candles along that line -- swing extreme and final touch included --
+   must actually rest on it for the line to count as confirmed rather
+   than two arbitrary points.
 6. **Signal** -- once price has touched the zone (a wick touch is enough,
    no close required):
    - still trading in/around the zone -> `IN_RANGE`
@@ -147,6 +151,26 @@ Before trusting any signal from this script:
 3. Fix `base_url` / `interval_map` in `config.json`, and the field-name
    fallbacks in `BitunixClient.get_symbols` / `get_klines`, if anything
    doesn't match.
+
+### Fixed: zone-entry false positive (pre-extreme touch)
+
+Live testing surfaced a real false-positive signal (AWEUSDT, 5m): the
+symbol was flagged as having entered its FVG zone while price was still
+trending up, well above the swing high, having never pulled back at all.
+Root cause: the "has price touched the zone" search window
+(`window_start` in `engine.py`) was bounded only by the FVG's
+confirmation index and `recent_touch_window`, with no floor at the swing
+extreme itself. An impulsive leg always passes through its own eventual
+FVG's price band on the way up (candle1 of a bullish FVG touches
+`gap_low` by construction), and can easily wick back into it during a
+mid-rally consolidation *before* the swing high is even made -- neither
+is a real retracement, but the old code could pick either up as a
+"touch" if it fell inside the window. Fixed by adding
+`extreme.index + 1` as an explicit floor, so only candles strictly after
+the swing extreme can ever count as a zone entry. Regression-tested in
+`tests/test_engine.py` (`TestPreExtremeTouchIsNotARetracement`), with a
+fixture verified to reproduce the bug against the old (unfloored)
+window before the fix.
 
 ## Known limitations / ideas for later
 
