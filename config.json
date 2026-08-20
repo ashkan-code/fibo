@@ -2,6 +2,7 @@
   "base_url": "https://fapi.bitunix.com/api/v1/futures/market",
   "breakout_body_ratio": 0.7,
   "candle_history": 250,
+  "debug_log_file": "trend_fvg_debug.log",
   "fib_ratios": [
     0.618,
     0.705,
@@ -16,6 +17,7 @@
   "market_bias": "LONG",
   "max_retracement_angle_degrees": 30,
   "max_workers": 15,
+  "min_trendline_touches": 3,
   "pivot_lookback": 3,
   "poll_interval_minutes": 5,
   "quote_currency": "USDT",

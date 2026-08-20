@@ -21,11 +21,14 @@ independently):
    to the prior opposite swing. Levels marked: `0.618`, `0.705`, `0.79`.
 4. **FVG confluence** -- all valid Fair Value Gaps inside that impulsive
    leg are found; at least one must overlap a fib level.
-5. **Retracement slope** -- the pullback from the swing extreme to the
-   point price first touched the FVG zone must be shallow (< 30 degrees
-   on a price-range-normalized synthetic angle -- see `trend_fvg/slope.py`
-   for exactly what that means and why raw price/time units can't be
-   compared directly).
+5. **Retracement slope + trendline** -- a line is drawn from the swing
+   extreme to the *last* candle that touched the FVG zone (not just any
+   two points). Its angle (abs value, on a price-range-normalized
+   synthetic scale -- see `trend_fvg/slope.py` for why raw price/time
+   units can't be compared directly) must be shallow (< 30 degrees), and
+   at least `min_trendline_touches` (default 3) candles along that line
+   -- swing extreme and final touch included -- must actually rest on it
+   for the line to count as confirmed rather than two arbitrary points.
 6. **Signal** -- once price has touched the zone (a wick touch is enough,
    no close required):
    - still trading in/around the zone -> `IN_RANGE`
@@ -61,10 +64,10 @@ trend_fvg/
   fibonacci.py               reverse fib level calculation
   fvg.py                     FVG detection with the 5-candle invalidation rule
   confluence.py               FVG <-> fib level overlap check
-  slope.py                    normalized retracement angle
-  engine.py                   per symbol/timeframe pipeline (steps 1-6)
-  scanner.py                  loops over symbols x timeframes, prints report
-tests/                       unit tests for the pivot/fib/FVG logic (synthetic data)
+  slope.py                    normalized retracement angle + trendline touch count
+  engine.py                   per symbol/timeframe pipeline (steps 1-6), returns AnalysisResult
+  scanner.py                  loops over symbols x timeframes, condensed scan log + report
+tests/                       unit tests for the pivot/fib/FVG/slope logic (synthetic data)
 ```
 
 Kline fetches for all symbol x timeframe pairs run concurrently through a
@@ -74,6 +77,29 @@ timeframes that keeps a full scan cycle well under the poll interval. A
 short per-request timeout (`request_timeout_seconds`, default 8s) means one
 slow/unresponsive symbol is logged as skipped and the rest of the batch
 keeps going instead of stalling.
+
+### Scan log
+
+Every symbol/timeframe check prints exactly one condensed line, e.g.:
+
+```
+MUSDT 5m: rejected (no clear trend)
+MUSDT 15m: rejected (retracement too steep, angle=42.3deg)
+BTCUSDT 1h: accepted -> MARKET
+```
+
+`engine.analyze()` returns an `AnalysisResult(signal, reason)`: on
+acceptance `signal` is set and `reason` is `None`; on rejection `signal`
+is `None` and `reason` is a short phrase describing exactly which pipeline
+step said no. `scanner.py` turns that straight into the one-line summary
+above -- no raw exception text, JSON, or multi-line dumps on stdout.
+
+Full error detail (raw HTTP/timeout/connection errors from a fetch
+failure) is written instead to a debug log file (`debug_log_file` in
+`config.json`, default `trend_fvg_debug.log`; override per run with
+`--log-file`). Accepted signals additionally get the detailed multi-line
+block (direction/zone/fib/angle/entry/stop_loss/target) after the scan log,
+as before.
 
 ## Setup (Termux)
 

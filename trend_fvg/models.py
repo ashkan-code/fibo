@@ -1,7 +1,7 @@
 """Core data structures shared across the strategy modules."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import NamedTuple, Optional
 
 
 @dataclass(frozen=True)
@@ -68,3 +68,13 @@ class Signal:
     entry: Optional[float] = None
     stop_loss: Optional[float] = None
     target: Optional[float] = None
+
+
+class AnalysisResult(NamedTuple):
+    """Outcome of running the pipeline for one symbol/timeframe: either a
+    Signal (accepted) with reason=None, or signal=None with a short,
+    human-readable reason suitable for a one-line scan log entry.
+    """
+
+    signal: Optional[Signal]
+    reason: Optional[str]

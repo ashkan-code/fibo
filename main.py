@@ -16,7 +16,7 @@ import time
 
 from trend_fvg import config as config_module
 from trend_fvg.bitunix_client import BitunixAPIError, BitunixClient
-from trend_fvg.scanner import print_report, run_scan
+from trend_fvg.scanner import configure_debug_logging, print_report, run_scan
 
 
 def parse_args():
@@ -32,6 +32,11 @@ def parse_args():
     parser.add_argument("--symbols", default=None, help="Comma-separated symbol override, e.g. BTCUSDT,ETHUSDT")
     parser.add_argument("--timeframes", default=None, help="Comma-separated timeframe override, e.g. 5m,15m")
     parser.add_argument("--check-api", action="store_true", help="Print raw API responses and exit.")
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Path for the debug log (full API errors, etc.) -- default: debug_log_file in config.json.",
+    )
     return parser.parse_args()
 
 
@@ -66,6 +71,9 @@ def main():
     if args.timeframes:
         cfg["timeframes"] = [tf.strip() for tf in args.timeframes.split(",") if tf.strip()]
 
+    log_path = args.log_file or cfg["debug_log_file"]
+    configure_debug_logging(log_path)
+
     client = BitunixClient(cfg)
 
     if args.check_api:
@@ -84,7 +92,10 @@ def main():
     if args.symbols:
         symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
 
-    print("Trend-FVG scanner starting. market_bias=%s timeframes=%s" % (cfg["market_bias"], cfg["timeframes"]))
+    print(
+        "Trend-FVG scanner starting. market_bias=%s timeframes=%s debug_log=%s"
+        % (cfg["market_bias"], cfg["timeframes"], log_path)
+    )
 
     while True:
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
