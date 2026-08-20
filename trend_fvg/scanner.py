@@ -52,23 +52,21 @@ def run_scan(client, cfg, symbols=None):
 
 
 def format_signal(signal):
-    base = "[%s] [%s] %s | direction=%s | zone=[%.8g, %.8g] | fib=%.3f | angle=%.1fdeg" % (
-        signal.symbol,
-        signal.timeframe,
-        signal.status,
-        signal.trend,
-        signal.zone_low,
-        signal.zone_high,
-        signal.fib_ratio,
-        signal.angle_degrees,
-    )
+    """Multi-line, narrow-terminal-friendly rendering of a single signal
+    (plain text only, no special characters -- this is read in Termux).
+    """
+    lines = [
+        "[%s] [%s] %s" % (signal.symbol, signal.timeframe, signal.status),
+        "  direction: %s" % signal.trend,
+        "  zone: [%.8g, %.8g]" % (signal.zone_low, signal.zone_high),
+        "  fib: %.3f" % signal.fib_ratio,
+        "  angle: %.1fdeg" % signal.angle_degrees,
+    ]
     if signal.status == "MARKET":
-        base += " | entry=%.8g | stop_loss=%.8g | target=%.8g" % (
-            signal.entry,
-            signal.stop_loss,
-            signal.target,
-        )
-    return base
+        lines.append("  entry: %.8g" % signal.entry)
+        lines.append("  stop_loss: %.8g" % signal.stop_loss)
+        lines.append("  target: %.8g" % signal.target)
+    return "\n".join(lines)
 
 
 def print_report(signals):
@@ -77,3 +75,4 @@ def print_report(signals):
         return
     for signal in signals:
         print(format_signal(signal))
+        print()
