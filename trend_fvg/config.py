@@ -18,7 +18,8 @@ DEFAULTS = {
     "quote_currency": "USDT",
     "base_url": "https://fapi.bitunix.com/api/v1/futures/market",
     "interval_map": {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h"},
-    "request_timeout_seconds": 10,
+    "request_timeout_seconds": 8,
+    "max_workers": 15,
 }
 
 VALID_BIAS = ("LONG", "SHORT")

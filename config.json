@@ -15,11 +15,12 @@
   },
   "market_bias": "LONG",
   "max_retracement_angle_degrees": 30,
+  "max_workers": 15,
   "pivot_lookback": 3,
   "poll_interval_minutes": 5,
   "quote_currency": "USDT",
   "recent_touch_window": 20,
-  "request_timeout_seconds": 10,
+  "request_timeout_seconds": 8,
   "timeframes": [
     "5m",
     "15m",

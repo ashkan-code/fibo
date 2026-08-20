@@ -25,12 +25,22 @@ class BitunixClient:
     def __init__(self, config):
         self.base_url = config["base_url"].rstrip("/")
         self.interval_map = config["interval_map"]
-        self.timeout = config.get("request_timeout_seconds", 10)
+        self.timeout = config.get("request_timeout_seconds", 8)
+
+        # A shared, pooled Session so concurrent scans (see scanner.py's
+        # thread pool) reuse connections instead of reconnecting per
+        # request. The pool is sized to the worker count so threads don't
+        # contend for connections.
+        self.session = requests.Session()
+        pool_size = config.get("max_workers", 15)
+        adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def _get(self, path, params=None):
         url = self.base_url + path
         try:
-            resp = requests.get(url, params=params, timeout=self.timeout)
+            resp = self.session.get(url, params=params, timeout=self.timeout)
         except requests.RequestException as exc:
             raise BitunixAPIError("Request to %s failed: %s" % (url, exc)) from exc
         if resp.status_code != 200:

@@ -10,8 +10,10 @@ qualifying trend + Fibonacci + Fair Value Gap (FVG) setup.
 For each symbol and each timeframe (`5m`, `15m`, `30m`, `1h`, checked
 independently):
 
-1. **Market bias filter** -- you set `LONG` or `SHORT` manually once a day
-   (`--set-bias`). Only trends matching that bias are considered.
+1. **Market bias filter** -- you set `LONG` or `SHORT` manually once a day,
+   either interactively (`main.py` prompts `LONG? (y/n):` at startup) or
+   non-interactively with `--set-bias` for cron/scripting. Only trends
+   matching that bias are considered.
 2. **Trend filter** -- swing highs/lows (fractals) are detected; a
    sequence of higher-high + higher-low is an uptrend, lower-high +
    lower-low is a downtrend. Anything else is skipped.
@@ -65,6 +67,14 @@ trend_fvg/
 tests/                       unit tests for the pivot/fib/FVG logic (synthetic data)
 ```
 
+Kline fetches for all symbol x timeframe pairs run concurrently through a
+thread pool (`max_workers` in `config.json`, default 15) since they're
+I/O-bound waits on Bitunix's API, not CPU work -- across ~200 symbols x 4
+timeframes that keeps a full scan cycle well under the poll interval. A
+short per-request timeout (`request_timeout_seconds`, default 8s) means one
+slow/unresponsive symbol is logged as skipped and the rest of the batch
+keeps going instead of stalling.
+
 ## Setup (Termux)
 
 ```
@@ -75,20 +85,20 @@ pip install -r requirements.txt
 ## Usage
 
 ```
-# Set today's bias once (LONG or SHORT) -- do this every day before the loop
+# Interactive: prompts "LONG? (y/n): " for today's bias, then runs continuously
+python main.py
+
+# Non-interactive bias override, e.g. for cron/scripting (skips the prompt)
 python main.py --set-bias LONG
 
 # Sanity-check the Bitunix endpoints before trusting the scanner
 python main.py --check-api
 
 # Single pass, useful while testing
-python main.py --once
+python main.py --set-bias LONG --once
 
 # Limit to specific symbols/timeframes while testing
-python main.py --once --symbols BTCUSDT,ETHUSDT --timeframes 5m,15m
-
-# Run continuously (default: every 5 minutes, see config.json)
-python main.py
+python main.py --set-bias LONG --once --symbols BTCUSDT,ETHUSDT --timeframes 5m,15m
 ```
 
 To run it in the background on Termux across app restarts, use

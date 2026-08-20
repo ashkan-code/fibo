@@ -2,9 +2,9 @@
 """Trend-FVG signal scanner for Bitunix futures (Termux-friendly, signal-only).
 
 Usage examples:
-  python main.py --set-bias LONG          # set today's manual market bias and exit
+  python main.py                          # prompts "LONG? (y/n): ", then scans every poll_interval_minutes
+  python main.py --set-bias LONG          # non-interactive bias override for scripting/cron, then scans
   python main.py --once                   # run a single scan pass and exit
-  python main.py                          # run continuously, scanning every poll_interval_minutes
   python main.py --symbols BTCUSDT,ETHUSDT --once
   python main.py --check-api              # dump raw Bitunix API responses for debugging
 """
@@ -22,7 +22,11 @@ from trend_fvg.scanner import print_report, run_scan
 def parse_args():
     parser = argparse.ArgumentParser(description="Trend-FVG signal scanner for Bitunix futures.")
     parser.add_argument("--config", default=None, help="Path to config.json (default: ./config.json)")
-    parser.add_argument("--set-bias", choices=["LONG", "SHORT"], help="Set today's market bias and exit.")
+    parser.add_argument(
+        "--set-bias",
+        choices=["LONG", "SHORT"],
+        help="Non-interactive market bias override for scripting/cron (skips the y/n prompt).",
+    )
     parser.add_argument("--once", action="store_true", help="Run a single scan pass and exit.")
     parser.add_argument("--interval", type=float, default=None, help="Override poll interval in minutes.")
     parser.add_argument("--symbols", default=None, help="Comma-separated symbol override, e.g. BTCUSDT,ETHUSDT")
@@ -31,13 +35,30 @@ def parse_args():
     return parser.parse_args()
 
 
+def prompt_bias():
+    """Ask the user for today's market bias as a y/n prompt. Loops until a
+    valid answer is given; exits with a clear message if stdin isn't
+    interactive (e.g. run unattended without --set-bias).
+    """
+    while True:
+        try:
+            answer = input("LONG? (y/n): ").strip().lower()
+        except EOFError:
+            print(
+                "\nNo interactive input available. Pass --set-bias LONG|SHORT for "
+                "non-interactive/scripted runs.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if answer in ("y", "yes"):
+            return "LONG"
+        if answer in ("n", "no"):
+            return "SHORT"
+        print("Please answer y or n.")
+
+
 def main():
     args = parse_args()
-
-    if args.set_bias:
-        config_module.set_market_bias(args.set_bias, args.config)
-        print("Market bias set to %s." % args.set_bias)
-        return
 
     cfg = config_module.load_config(args.config)
     if args.interval is not None:
@@ -50,6 +71,14 @@ def main():
     if args.check_api:
         client.check_api()
         return
+
+    if args.set_bias:
+        bias = args.set_bias
+    else:
+        bias = prompt_bias()
+    config_module.set_market_bias(bias, args.config)  # persist for next run
+    cfg["market_bias"] = bias
+    print("Market bias set to %s." % bias)
 
     symbols = None
     if args.symbols:
