@@ -1,15 +1,13 @@
 """Per-symbol/per-timeframe pipeline: trend filter -> fib ->
-FVG/fib confluence -> retracement slope/trendline -> current price status.
+FVG/fib confluence -> regression slope -> current price status.
 """
 
-from .confluence import fvgs_overlapping_fib
+from .confluence import fvgs_overlapping_fib, intersect_zone
 from .fibonacci import compute_fib_levels
 from .fvg import detect_fvgs
 from .models import AnalysisResult, Signal
-from .slope import compute_angle_degrees, count_trendline_touches
+from .slope import compute_regression_angle_degrees
 from .swings import classify_trend, find_pivots, get_impulsive_leg
-
-DEFAULT_MIN_TRENDLINE_TOUCHES = 3
 
 
 def analyze(candles, symbol, timeframe, market_bias, cfg):
@@ -59,68 +57,69 @@ def analyze(candles, symbol, timeframe, market_bias, cfg):
     matched.sort(key=lambda pair: pair[0].idx3)
     fvg, ratio = matched[-1]
 
-    # Only look at recent price action for the touch -- an FVG that price
-    # touched long ago and has since drifted away from is not "live". Keep
-    # the LAST (most recent) touching candle in the window, not the first:
-    # that's the actual entry point price is reacting from right now, and
-    # it's the correct trendline endpoint (see below).
+    # "The zone" is the FVG/fib INTERSECTION, not the raw FVG range --
+    # computed once here and reused for every downstream check (touch
+    # detection, the regression endpoint, breakout/exit, stop-loss) so
+    # none of them can disagree about what counts as "inside". Price
+    # sitting in a part of the FVG that falls outside the fib band must
+    # never count as having reached the zone.
+    zone = intersect_zone(fvg, fib_levels)
+    if zone is None:
+        return AnalysisResult(None, "no FVG/fib intersection")
+    zone_low, zone_high = zone
+
+    # Only look at recent price action for the touch -- a zone that price
+    # touched long ago and has since drifted away from is not "live".
     #
     # Critical: the window must never reach back to candles at or before
-    # the swing extreme itself. The impulsive leg naturally passes through
-    # the eventual FVG's price band on its way up (candle1 of a bullish
-    # FVG touches gap_low by construction, and a mid-rally consolidation
-    # can easily wick back into the zone too) -- none of that is a real
-    # retracement. Only a candle strictly AFTER the extreme represents
-    # price actually pulling back into the zone once the high was made.
-    # Without this floor, a still-trending, never-pulled-back symbol can
-    # get a false "touch" from its own pre-high price action.
+    # the swing extreme itself. The impulsive leg naturally passes
+    # through the eventual zone's price band on its way up, and a
+    # mid-rally consolidation can easily wick back into it too -- none of
+    # that is a real retracement. Only a candle strictly AFTER the
+    # extreme represents price actually pulling back into the zone once
+    # the high was made.
     window_start = max(fvg.confirmed_idx, len(candles) - cfg["recent_touch_window"], extreme.index + 1)
-    touch_idx = None
-    for j in range(window_start, len(candles)):
-        c = candles[j]
-        if c.low <= fvg.gap_high and c.high >= fvg.gap_low:
-            touch_idx = j
-    if touch_idx is None:
+    touching_indices = [
+        j
+        for j in range(window_start, len(candles))
+        if candles[j].low <= zone_high and candles[j].high >= zone_low
+    ]
+    if not touching_indices:
         return AnalysisResult(None, "zone not reached yet")
+    first_touch_idx = touching_indices[0]
+    last_touch_idx = touching_indices[-1]
 
-    # The retracement trendline runs from the swing extreme to that last
-    # touch -- not just any two points -- and needs at least
-    # min_trendline_touches candles (endpoints included) actually
-    # resting on it to be treated as a confirmed line rather than a
-    # coincidental two-point connection.
-    touch_price = candles[touch_idx].low if trend == "UP" else candles[touch_idx].high
-    price_delta = touch_price - extreme.price
-    candle_delta = touch_idx - extreme.index
-    angle = compute_angle_degrees(price_delta, leg_range, candle_delta)
+    # Linear regression of closes from the TRUE start of the impulsive
+    # move (prior -- the leg's actual origin, per get_impulsive_leg)
+    # through to the first candle that reached the zone. This replaces
+    # the old two/three-point trendline check: fitting a line over the
+    # whole observed leg is a much more robust "was this an orderly,
+    # gentle move" check than a handful of discrete touch points.
+    angle = compute_regression_angle_degrees(candles, prior.index, first_touch_idx, leg_range)
     if abs(angle) >= cfg["max_retracement_angle_degrees"]:
         return AnalysisResult(None, "retracement too steep, angle=%.1fdeg" % angle)
 
-    touches = count_trendline_touches(candles, extreme.index, extreme.price, touch_idx, touch_price)
-    min_touches = cfg.get("min_trendline_touches", DEFAULT_MIN_TRENDLINE_TOUCHES)
-    if touches < min_touches:
-        return AnalysisResult(None, "trendline unconfirmed, touches=%d" % touches)
-
-    status, breakout_candle = _resolve_status(candles, touch_idx, fvg, trend, cfg["breakout_body_ratio"])
+    status, breakout_candle = _resolve_status(candles, last_touch_idx, zone_low, zone_high, trend, cfg["breakout_body_ratio"])
 
     signal = Signal(
         symbol=symbol,
         timeframe=timeframe,
         trend=trend,
         status=status,
-        zone_low=fvg.gap_low,
-        zone_high=fvg.gap_high,
+        zone_low=zone_low,
+        zone_high=zone_high,
         fib_ratio=ratio,
         angle_degrees=angle,
-        touch_index=touch_idx,
+        touch_index=last_touch_idx,
     )
     if status == "MARKET" and breakout_candle is not None:
         signal.entry = breakout_candle.close
-        signal.stop_loss = fvg.gap_low if trend == "UP" else fvg.gap_high
+        signal.stop_loss = zone_low if trend == "UP" else zone_high
         signal.target = extreme.price
     return AnalysisResult(signal, None)
 
 
-def _resolve_status(candles, touch_idx, fvg, trend, body_ratio_threshold):
+def _resolve_status(candles, touch_idx, zone_low, zone_high, trend, body_ratio_threshold):
     """From the last touch onward, look for a strong breakout candle.
     If none is found, classify the latest candle as still ranging inside
     the zone (IN_RANGE) or having left it without breaking (EXITED).
@@ -128,12 +127,12 @@ def _resolve_status(candles, touch_idx, fvg, trend, body_ratio_threshold):
     for j in range(touch_idx, len(candles)):
         c = candles[j]
         if trend == "UP":
-            broke = c.close > fvg.gap_high
+            broke = c.close > zone_high
         else:
-            broke = c.close < fvg.gap_low
+            broke = c.close < zone_low
         if broke and c.body_ratio > body_ratio_threshold:
             return "MARKET", c
 
     last = candles[-1]
-    touching = last.low <= fvg.gap_high and last.high >= fvg.gap_low
+    touching = last.low <= zone_high and last.high >= zone_low
     return ("IN_RANGE", None) if touching else ("EXITED", None)

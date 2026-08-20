@@ -11,7 +11,6 @@ DEFAULTS = {
     "pivot_lookback": 3,
     "fib_ratios": [0.382, 0.295, 0.21],
     "max_retracement_angle_degrees": 30,
-    "min_trendline_touches": 3,
     "breakout_body_ratio": 0.70,
     "recent_touch_window": 20,
     "candle_history": 250,

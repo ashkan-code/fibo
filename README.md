@@ -25,19 +25,26 @@ independently):
    discount (resp. premium) area. Same prices either way; see
    `trend_fvg/fibonacci.py`.
 4. **FVG confluence** -- all valid Fair Value Gaps inside that impulsive
-   leg are found; at least one must overlap a fib level.
-5. **Retracement slope + trendline** -- a line is drawn from the swing
-   extreme to the *last* candle that touched the FVG zone (not just any
-   two points), and that touch must have happened strictly *after* the
-   swing extreme -- price passing through the zone's price band on its
-   way up to make the high (which it always does) doesn't count; see
-   "zone-entry false positive" below. The line's angle (abs value, on a
-   price-range-normalized synthetic scale -- see `trend_fvg/slope.py` for
-   why raw price/time units can't be compared directly) must be shallow
-   (< 30 degrees), and at least `min_trendline_touches` (default 3)
-   candles along that line -- swing extreme and final touch included --
-   must actually rest on it for the line to count as confirmed rather
-   than two arbitrary points.
+   leg are found; at least one must overlap a fib level. "The zone" from
+   here on is the **FVG/fib intersection** -- `max(FVG_low, fib_low)` to
+   `min(FVG_high, fib_high)` -- not the full FVG range. Price wicking
+   into a part of the FVG that falls outside the fib band never counts
+   as reaching the zone, for anything below: not the regression endpoint,
+   not touch detection, not breakout/exit, not stop-loss placement. This
+   intersection is computed once (`trend_fvg/confluence.py`,
+   `intersect_zone`) and reused everywhere so nothing downstream can
+   disagree about what's "inside". See `trend_fvg/confluence.py`.
+5. **Retracement slope, via linear regression** -- fit a simple linear
+   regression (close price vs. candle index) over every candle from the
+   true start of the impulsive move (the swing that began the leg) up
+   to the first candle that reached the zone. Convert the fitted slope
+   to degrees the same way a raw two-point slope is normalized (against
+   the leg's own price range, so raw price/time units are never compared
+   directly -- see `trend_fvg/slope.py`), take the absolute value, and
+   require it to be shallow (< 30 degrees). Fitting over the whole
+   observed leg is far more robust than checking a handful of discrete
+   points on a two/three-point trendline: one noisy candle can't flip
+   the verdict.
 6. **Signal** -- once price has touched the zone (a wick touch is enough,
    no close required):
    - still trading in/around the zone -> `IN_RANGE`
@@ -72,11 +79,11 @@ trend_fvg/
   swings.py                 pivot detection + HH/HL / LH/LL trend classification
   fibonacci.py               fib level calculation (standard direction)
   fvg.py                     FVG detection with the 5-candle invalidation rule
-  confluence.py               FVG <-> fib level overlap check
-  slope.py                    normalized retracement angle + trendline touch count
+  confluence.py               FVG <-> fib level overlap check + FVG/fib intersect_zone
+  slope.py                    normalized retracement angle via linear regression
   engine.py                   per symbol/timeframe pipeline (steps 1-6), returns AnalysisResult
   scanner.py                  loops over symbols x timeframes, condensed scan log + report
-tests/                       unit tests for the pivot/fib/FVG/slope logic (synthetic data)
+tests/                       unit tests for the pivot/fib/FVG/slope/confluence logic (synthetic data)
 ```
 
 Kline fetches for all symbol x timeframe pairs run concurrently through a
@@ -222,6 +229,56 @@ which end of the leg is labeled "0%" changed. Regression-tested in
 ratios against the standard-direction formula) and
 `tests/test_swings.py` (`TestImpulsiveLegFindsTrueMoveOrigin`, updated
 to match).
+
+### Changed: zone is now the FVG/fib intersection, and slope uses linear regression
+
+Two related changes, both centered on treating the FVG/fib **intersection**
+as the one true "valid zone" instead of the full FVG range:
+
+- **Zone entry.** `intersect_zone()` (`trend_fvg/confluence.py`) computes
+  `max(FVG_low, fib_low)` to `min(FVG_high, fib_high)` once per analysis,
+  and `engine.py` uses that result -- not the raw FVG -- for every
+  downstream check: touch detection, the regression endpoint, the
+  breakout/exit scan, and stop-loss placement. Price wicking into the
+  part of an FVG that falls outside the fib band no longer counts as
+  reaching the zone at all.
+- **Retracement slope.** Replaced the two/three-point trendline +
+  touch-counting check (`count_trendline_touches`,
+  `min_trendline_touches`, removed) with a linear regression
+  (`compute_regression_angle_degrees` in `trend_fvg/slope.py`) fit over
+  every candle's close price from the true start of the impulsive move
+  (the leg's actual origin, per the earlier true-move-origin fix) through
+  to the *first* candle that reached the (now intersection-based) zone.
+  The fitted slope is normalized into degrees the same way the old
+  two-point slope was (via `compute_angle_degrees` with `candle_delta=1`,
+  reusing the same normalize-by-leg-range-then-atan2 primitive), and its
+  absolute value must stay under `max_retracement_angle_degrees`.
+
+  Touch-counting was removed rather than kept as a secondary check: the
+  regression already fits over the whole observed leg (frequently dozens
+  of candles), which is a substantially more robust "was this an orderly
+  move" signal than whether ~3 discrete candles happened to sit on a
+  straight line -- keeping both would have been redundant complexity for
+  little additional signal, and the touches threshold was calibrated for
+  the old (much shorter) extreme-to-touch span, not this one.
+
+  One notable property: because the regression is a least-squares fit
+  over the *entire* leg (routinely 8+ candles just for the impulsive
+  climb before any pullback even starts), a single noisy candle now has
+  much less leverage over the verdict than it used to -- see the
+  "steep retracement" test in `tests/test_engine.py` for what it actually
+  takes to trip the threshold once real leg structure is mixed in, versus
+  the clean, isolated cases in `tests/test_slope.py`
+  (`TestRegressionAngle`).
+
+Regression-tested in `tests/test_confluence.py` (`intersect_zone` against
+FVG-narrower-than-band, band-narrower-than-FVG -- the reported bug shape
+-- partial overlap on each side, and no-overlap cases) and
+`tests/test_engine.py` (price reaching the FVG but not the intersection
+-> no signal; price reaching the actual intersection -> normal signal
+logic; shallow/steep regression slopes for both uptrend and downtrend
+pullbacks, confirming abs() handles the naturally-opposite raw slope sign
+in each direction).
 
 ## Known limitations / ideas for later
 

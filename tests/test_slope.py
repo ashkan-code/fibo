@@ -1,11 +1,18 @@
 import unittest
 
 from trend_fvg.models import Candle
-from trend_fvg.slope import compute_angle_degrees, count_trendline_touches, trendline_price_at
+from trend_fvg.slope import compute_angle_degrees, compute_regression_angle_degrees, linear_regression_slope
 
 
 def _candle(i, o, h, l, c):
     return Candle(index=i, timestamp=i * 60, open=o, high=h, low=l, close=c, volume=0.0)
+
+
+def _closes(values):
+    """Candles whose close is exactly `values[i]` at index i (open/high/low
+    are irrelevant to the regression, which only reads .close).
+    """
+    return [_candle(i, v, v + 0.5, v - 0.5, v) for i, v in enumerate(values)]
 
 
 class TestSlope(unittest.TestCase):
@@ -44,36 +51,75 @@ class TestSlope(unittest.TestCase):
         self.assertGreaterEqual(abs(angle), 30)
 
 
-class TestTrendlineTouches(unittest.TestCase):
-    def test_price_at_interpolates_linearly(self):
-        self.assertAlmostEqual(trendline_price_at(0, 100, 10, 50, 5), 75)
-        self.assertAlmostEqual(trendline_price_at(0, 100, 10, 50, 0), 100)
-        self.assertAlmostEqual(trendline_price_at(0, 100, 10, 50, 10), 50)
+class TestLinearRegressionSlope(unittest.TestCase):
+    def test_perfect_line_slope_matches_exactly(self):
+        xs = [0, 1, 2, 3, 4]
+        ys = [10, 12, 14, 16, 18]  # slope = 2
+        self.assertAlmostEqual(linear_regression_slope(xs, ys), 2.0)
 
-    def test_endpoints_always_count_as_touches(self):
-        # A straight decline where only the two endpoints actually sit on
-        # the line -- everything in between is well above it.
-        candles = [
-            _candle(0, 100, 100, 100, 100),
-            _candle(1, 95, 96, 94, 95),
-            _candle(2, 90, 91, 89, 90),
-            _candle(3, 60, 61, 59, 60),
-        ]
-        touches = count_trendline_touches(candles, start_idx=0, start_price=100, end_idx=3, end_price=60)
-        self.assertEqual(touches, 2)
+    def test_negative_slope(self):
+        xs = [0, 1, 2, 3]
+        ys = [100, 90, 80, 70]  # slope = -10
+        self.assertAlmostEqual(linear_regression_slope(xs, ys), -10.0)
 
-    def test_confirmed_line_has_at_least_three_touches(self):
-        # Candles that actually decline along the same straight line from
-        # (0, 100) to (4, 60) -- every candle's wick brackets the line
-        # price at its index, so all 5 should register as touches.
-        candles = [_candle(i, 100 - 10 * i + 0.5, 100 - 10 * i + 1, 100 - 10 * i - 1, 100 - 10 * i - 0.5) for i in range(5)]
-        touches = count_trendline_touches(candles, start_idx=0, start_price=100, end_idx=4, end_price=60)
-        self.assertGreaterEqual(touches, 3)
+    def test_fewer_than_two_points_is_flat(self):
+        self.assertEqual(linear_regression_slope([], []), 0.0)
+        self.assertEqual(linear_regression_slope([5], [100]), 0.0)
 
-    def test_invalid_range_returns_zero(self):
-        candles = [_candle(0, 10, 11, 9, 10), _candle(1, 10, 11, 9, 10)]
-        self.assertEqual(count_trendline_touches(candles, start_idx=1, start_price=10, end_idx=0, end_price=10), 0)
-        self.assertEqual(count_trendline_touches(candles, start_idx=0, start_price=10, end_idx=0, end_price=10), 0)
+    def test_no_x_variance_is_flat(self):
+        self.assertEqual(linear_regression_slope([3, 3, 3], [1, 5, 9]), 0.0)
+
+
+class TestRegressionAngle(unittest.TestCase):
+    def test_end_idx_not_after_start_idx_is_flat(self):
+        candles = _closes([100, 99, 98])
+        self.assertEqual(compute_regression_angle_degrees(candles, 1, 1, 100), 0.0)
+        self.assertEqual(compute_regression_angle_degrees(candles, 2, 0, 100), 0.0)
+
+    def test_zero_leg_range_is_flat(self):
+        candles = _closes([100, 90, 80])
+        self.assertEqual(compute_regression_angle_degrees(candles, 0, 2, 0), 0.0)
+
+    def test_shallow_uptrend_pullback_passes(self):
+        # Uptrend pullback: closes grind DOWN gently (naturally negative
+        # raw slope) across many candles -- a small fraction of the leg
+        # range -- must read as shallow.
+        closes = [100 - i * (5 / 19) for i in range(20)]  # 100 -> ~95 over 20 candles
+        candles = _closes(closes)
+        angle = compute_regression_angle_degrees(candles, 0, 19, leg_range=100)
+        self.assertLess(abs(angle), 30)
+
+    def test_steep_uptrend_pullback_fails(self):
+        # Uptrend pullback: closes collapse DOWN hard over just 2 candles
+        # (naturally negative raw slope) -- must read as steep.
+        candles = _closes([100, 60, 20])  # slope = -40 over a leg_range of 50
+        angle = compute_regression_angle_degrees(candles, 0, 2, leg_range=50)
+        self.assertGreaterEqual(abs(angle), 30)
+
+    def test_shallow_downtrend_pullback_passes(self):
+        # Downtrend pullback: closes grind UP gently (naturally positive
+        # raw slope) -- must also read as shallow. Confirms abs() handles
+        # the positive-slope direction the same as the negative one.
+        closes = [95 + i * (5 / 19) for i in range(20)]  # 95 -> ~100 over 20 candles
+        candles = _closes(closes)
+        angle = compute_regression_angle_degrees(candles, 0, 19, leg_range=100)
+        self.assertLess(abs(angle), 30)
+
+    def test_steep_downtrend_pullback_fails(self):
+        # Downtrend pullback: closes rip UP hard over just 2 candles
+        # (naturally positive raw slope) -- must also read as steep.
+        candles = _closes([20, 60, 100])  # slope = +40 over a leg_range of 50
+        angle = compute_regression_angle_degrees(candles, 0, 2, leg_range=50)
+        self.assertGreaterEqual(abs(angle), 30)
+
+    def test_symmetric_steep_moves_give_the_same_angle_either_direction(self):
+        # The uptrend (negative slope) and downtrend (positive slope)
+        # steep cases above are mirror images of each other -- abs()
+        # must make them compare equal, not treat one as steep and the
+        # other as shallow because of sign.
+        up = compute_regression_angle_degrees(_closes([100, 60, 20]), 0, 2, leg_range=50)
+        down = compute_regression_angle_degrees(_closes([20, 60, 100]), 0, 2, leg_range=50)
+        self.assertAlmostEqual(up, down)
 
 
 if __name__ == "__main__":
